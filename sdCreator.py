@@ -12,18 +12,18 @@ from optparse import OptionParser
 
 def sdExtract():
 	try:
-	    call = subprocess.Popen(["SMdevices"], shell=True, stdout=PIPE)
+	    sm_call = subprocess.Popen(["SMdevices"], shell=True, stdout=PIPE)
 	except OSError as e:
 
 	   	# This isn't working right at the moment but if SMdevices doesn't exist it throws a system error so.. /shrug
 
 		print e
 	
-	out = call.communicate()[0]
+	sm_out = sm_call.communicate()[0]
 	
 	devs = dict()
 	lnum = 1
-	for line in StringIO.StringIO(out):
+	for line in StringIO.StringIO(sm_out):
 		
 		matchObj = re.match('\s{2}\/dev\/(sd\w{1,2})\s\(\S*\s\[Storage\sArray\s(\w*)\,\sVolume\s(\S*)\,\sLUN\s(\d{1,3})\,\sVolume\sID\s\<(\w*)\>\,\s(Preferred|Alternate)\sPath\s\(Controller\-([AB])\)\:\s(In\sUse|Owning)', line)
 		if matchObj:
@@ -50,6 +50,23 @@ def generateSdEntries(name):
                 else:
                         continue
 
+def getMpathTbl():
+	try:
+	    m_call = subprocess.Popen(["multipath", "-ll"]), shell=True, stdout=PIPE)
+	except OSError as e:
+		print e
+
+	m_out = m_call.communicate()[0]
+	
+	mpathdevs = dict()
+	en = 1
+	for l in StringIO.StringIO(m_out):
+		match_obj = re.match('(mpath\w+)\s\((\w+)\)', l)
+		if match_obj:
+			mpathdevs[en] = {'name': match_obj.group(1), 'volId': match_obj.group(2)}
+			en = en + 1
+	return mpathdevs
+ 
 def getDevs():
 	
 	d = sdExtract()
