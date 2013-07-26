@@ -38,21 +38,30 @@ def drawDevTable(d):
 	for l in d.keys():
 		print " ", l, " /dev/" + d[l]['sd'], "\tSAName: " + d[l]['sa'], "\tVolume: " + d[l]['volLbl'], "\tLUN: " + d[l]['lun'], "\tVolID: " + d[l]['volId'], "\tPref Path: " + d[l]['path']
 
-def generateSdEntries(name):
+def generateSdEntries(name, mp):
 	print "\n"
         devTbl = sdExtract()
+	mpathTbl = getMpathTbl()
         index = 1
+
         for n in devTbl.keys():
-                entryName = devTbl[n]['sa']
-                if name == entryName:
-                        print "sd=sd" + str(index) + ",lun=/dev/" + devTbl[n]['sd'] + ",openflags=o_direct"
-                        index = index + 1
-                else:
-                        continue
+       	        entryName = devTbl[n]['sa']
+               	if name == entryName:
+			if mp.lower() == 'y':
+				for m in mpathTbl.keys():
+					if devTbl[n]['volId'] == mpathTbl[m]['volId']:
+						print "sd=sd" + str(index) + ",lun=/dev/mapper/" + mpathTbl[m]['name']
+					else:
+						continue
+			else:
+                       		print "sd=sd" + str(index) + ",lun=/dev/" + devTbl[n]['sd'] + ",openflags=o_direct"
+                       	index = index + 1
+               	else:
+                       	continue
 
 def getMpathTbl():
 	try:
-	    m_call = subprocess.Popen(["multipath", "-ll"]), shell=True, stdout=PIPE)
+	    m_call = subprocess.Popen((["multipath", "-ll"]), stdout=PIPE)
 	except OSError as e:
 		print e
 
@@ -61,10 +70,13 @@ def getMpathTbl():
 	mpathdevs = dict()
 	en = 1
 	for l in StringIO.StringIO(m_out):
-		match_obj = re.match('(mpath\w+)\s\((\w+)\)', l)
+		match_obj = re.match('(mpath\w+)\s\(\d{1}(\w+)\)\sdm\-\d+\s(LSI|NETAPP),(\w*-01-00)', l)
 		if match_obj:
-			mpathdevs[en] = {'name': match_obj.group(1), 'volId': match_obj.group(2)}
-			en = en + 1
+			if match_obj.group(3) in ('LSI','NETAPP'):
+				mpathdevs[en] = {'name': match_obj.group(1), 'volId': match_obj.group(2)}
+				en = en + 1
+			else:
+				continue
 	return mpathdevs
  
 def getDevs():
@@ -99,7 +111,8 @@ def main():
 				continue
 			elif input.lower() == 'g':
 				nmIn = raw_input('\tEnter SAName you want to create definitions for: ')
-				generateSdEntries(nmIn)
+				mpd = raw_input('\tDo you want DM-MP mpath devs? (Y/N): ')
+				generateSdEntries(nmIn, mpd)
 				print "\n"
 				continue
 			elif input.lower() == 'q':
