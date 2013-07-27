@@ -143,12 +143,10 @@ def runWithArgs():
 
 	(options, args) = parser.parse_args()
 
-	if mpath_d == 'True':
-		mp = 'y'
-	else:
-		mp ='n'
+	mpath_d = options.mpath_d
+	saname = options.saname
 
-	generateSdEntries(saname, mp)
+	generateSdEntries(saname, mpath_d)
 	sys.exit(0)
 
 def main():
