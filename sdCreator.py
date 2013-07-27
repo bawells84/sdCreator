@@ -1,16 +1,22 @@
 #!/usr/bin/python
 
 # Use for generating 'sd' entries for a vdBench parameters file.
-# This right now this only works with /dev/sd* devices and as such only works returns in-use pathing
-# adding logic to handle reconiling to mpath devs for DMMP is on the to-do
 # Relies on the system having SMdevices installed
 # Written and tested against Python 2.6.6
+
+vers = '0.5'
+
+# TODO: 
+#	* Get exception handling in getSMdevs() and getMpaths()
+#	  working and on exception exit with a meaningful error msg 
 
 import re, sys, subprocess, StringIO
 from subprocess import Popen, PIPE
 from optparse import OptionParser
 
-def sdExtract():
+# Build dictionary of /dev/sd paths and device info from SMdevices output for raw device I/O
+# Only pulls preferred, in-use path(s) since this will either be a /dev/sd* or MPP managed /dev device
+def getSMdevs():
 	try:
 	    sm_call = subprocess.Popen(["SMdevices"], shell=True, stdout=PIPE)
 	except OSError as e:
@@ -33,33 +39,10 @@ def sdExtract():
 
 	return devs
 
-def drawDevTable(d):
-	
-	for l in d.keys():
-		print " ", l, " /dev/" + d[l]['sd'], "\tSAName: " + d[l]['sa'], "\tVolume: " + d[l]['volLbl'], "\tLUN: " + d[l]['lun'], "\tVolID: " + d[l]['volId'], "\tPref Path: " + d[l]['path']
-
-def generateSdEntries(name, mp):
-	print "\n"
-        devTbl = sdExtract()
-	mpathTbl = getMpathTbl()
-        index = 1
-
-        for n in devTbl.keys():
-       	        entryName = devTbl[n]['sa']
-               	if name == entryName:
-			if mp.lower() == 'y':
-				for m in mpathTbl.keys():
-					if devTbl[n]['volId'] == mpathTbl[m]['volId']:
-						print "sd=sd" + str(index) + ",lun=/dev/mapper/" + mpathTbl[m]['name']
-					else:
-						continue
-			else:
-                       		print "sd=sd" + str(index) + ",lun=/dev/" + devTbl[n]['sd'] + ",openflags=o_direct"
-                       	index = index + 1
-               	else:
-                       	continue
-
-def getMpathTbl():
+# Build dictionary of mpath names and associated vol WWNs
+# Only pulls those that are reported as LSI or NETAPP in VPD data
+# -NOTE: there is a fourth match group in the regex for the INF-01-00 that is unused
+def getMpaths():
 	try:
 	    m_call = subprocess.Popen((["multipath", "-ll"]), stdout=PIPE)
 	except OSError as e:
@@ -78,41 +61,71 @@ def getMpathTbl():
 			else:
 				continue
 	return mpathdevs
- 
-def getDevs():
-	
-	d = sdExtract()
-	drawDevTable(d)
+
+# Generate the sd=. . . entries for use in a vdBench parameter file
+# Takes an array name and bool for whether or not DMMP /dev/mapper paths
+# should be returned instead of /dev/sd* paths with o_direct set.
+def generateSdEntries(name, mp):
 	print "\n"
+        devTbl = getSMdevs()
+	mpathTbl = getMpaths()
+        index = 1
+
+        for n in devTbl.keys():
+       	        entryName = devTbl[n]['sa']
+               	if name == entryName:
+			if mp:
+				for m in mpathTbl.keys():
+					if devTbl[n]['volId'] == mpathTbl[m]['volId']:
+						print "sd=sd" + str(index) + ",lun=/dev/mapper/" + mpathTbl[m]['name']
+					else:
+						continue
+			else:
+                       		print "sd=sd" + str(index) + ",lun=/dev/" + devTbl[n]['sd'] + ",openflags=o_direct"
+                       	index = index + 1
+               	else:
+                       	continue
+
+# Pretty print the getSMdevs() dictionary
+def printDevs():
 	
-def main():
-	
+	d = getSMdevs()
+	for l in d.keys():
+		print " ", l, " /dev/" + d[l]['sd'], "\tSAName: " + d[l]['sa'], "\tVolume: " + d[l]['volLbl'], "\tLUN: " + d[l]['lun'], "\tVolID: " + d[l]['volId'], "\tPref Path: " + d[l]['path']
+	print "\n"
+
+# Run with menu driven interface
+def run():
+
 	print "\n"
 	print "\t#########################################"
 	print "\t####                                 ####"
 	print "\t#### vdBench SD definition generator ####"
 	print "\t####         for E-Series            ####"
-	print "\t####             v 0.1               ####"
+	print "\t####             v", vers, "              ####"
 	print "\t####                                 ####"
 	print "\t#########################################"
 	print "\n"
-	
+
 	while True:
 		input = raw_input('\tSelect: (P)rint All, (G)enerate SD Definition, (Q)uit: ')
 		
-	#	if str.isalpha(input) == 'False':
 		if input.lower() not in ('p','g','q'):	
 			print "\tInput was not recognized, please try again."
 			continue
 		else:
 			if input.lower() == 'p':
 				print "\n"
-				getDevs()
+				printDevs()
 				continue
 			elif input.lower() == 'g':
 				nmIn = raw_input('\tEnter SAName you want to create definitions for: ')
-				mpd = raw_input('\tDo you want DM-MP mpath devs? (Y/N): ')
-				generateSdEntries(nmIn, mpd)
+				mpaths = raw_input('\tDo you want DM-MP mpath devs? (Y/N): ')
+				if mpaths.lower() == 'y':
+					mpaths = 'True'
+				else:
+					mpaths = 'False'
+				generateSdEntries(nmIn, mpaths)
 				print "\n"
 				continue
 			elif input.lower() == 'q':
@@ -120,6 +133,30 @@ def main():
 				break
 			else:
 				continue		
+
+# Run with command line arguments and no menu
+def runWithArgs():
+
+	parser = OptionParser()
+	parser.add_option("-n", dest="saname", action="store", type="string", help="Storage array name to create sd definitions for")
+	parser.add_option("-m", action="store_true", dest="mpath_d", default=False, help="Specify for DMMP /dev/mapper paths")
+
+	(options, args) = parser.parse_args()
+
+	if mpath_d == 'True':
+		mp = 'y'
+	else:
+		mp ='n'
+
+	generateSdEntries(saname, mp)
+	sys.exit(0)
+
+def main():
+	
+	if sys.argv[1:]:
+		runWithArgs()
+	else:
+		run()	
 
 if __name__ == "__main__":
 	main()
